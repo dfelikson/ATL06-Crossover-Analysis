@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import numpy as np
-
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
 import matplotlib as mpl
+import seaborn as sns
 #mpl.use('Agg')
 import matplotlib.pyplot as plt
 import pyproj
@@ -29,59 +31,63 @@ def read_xovers(xover_dir, verbose=False, wildcard='*', r_limits=[0, 1.e7], delt
         delta: dict of nx2 matrices, giving ATL06 parameter differences between the crossover measurents, late minus early
         meta: metadata values at the crossovers
     """
+    cycles = ['03','04','05','06','07','08','09','10','11','12','13']
+#    cycles = ['03','04','05','06']
 
+    for cycle in cycles:
+      tiles=glob.glob(xover_dir+'/c'+cycle+'_1_extra_segments/*.h5')
+#      tiles=glob.glob(xover_dir+'/*.h5')
+      with h5py.File(tiles[0],'r') as h5f:
+          fields=[key for key in h5f['data_0'].keys()]
 
-    tiles=glob.glob(xover_dir+'/*.h5')
-    
-    with h5py.File(tiles[0],'r') as h5f:
-        fields=[key for key in h5f['data_0'].keys()]
+      xformer_pol2ll=pyproj.Transformer.from_crs(3031, 4326)
+      D=[]
+      meta=[]
 
-    xformer_pol2ll=pyproj.Transformer.from_crs(3031, 4326)
-    D=[]
-    meta=[]
+      tile_re=re.compile('E(.*)_N(.*).h5')
+      for tile in glob.glob(xover_dir+'/c'+cycle+'_1_extra_segments/'+wildcard+'.h5'): 
+#      for tile in glob.glob(xover_dir+'/'+wildcard+'.h5'):                   
+          m=tile_re.search(tile)
+          lat, lon = xformer_pol2ll.transform(m.group(1),m.group(2))
 
-    tile_re=re.compile('E(.*)_N(.*).h5')
-    for tile in glob.glob(xover_dir+'/'+wildcard+'.h5'): 
-        m=tile_re.search(tile)
+          if (-75 >= lat >= -85) & (120 <= lon <= 140):
+      
+            if m is not None:
+                r2=np.float(m.group(1))**2+np.float(m.group(2))**2
+                if (r2 < r_limits[0]**2) or (r2 > r_limits[1]**2):
+                    continue
+            try:
+                this_D=[pc.data().from_h5(tile, field_dict={gr : fields}) for gr in ['data_0','data_1']]
+                this_meta=pc.data().from_h5(tile, field_dict={None:['slope_x', 'slope_y','grounded']})
+                if delta_t_limit is not None:
+                    good=np.abs(this_D[1].delta_time[:,0]-this_D[0].delta_time[:,0]) < delta_t_limit
+                    for Di in this_D:
+                        Di.index(good)
+                    this_meta.index(good)
 
-        lat, lon = xformer_pol2ll.transform(m.group(1),m.group(2))
-        if (-75 >= lat >= -85) & (120 <= lon <= 140):
-          print("lat",lat,"lon",lon)  
-          if m is not None:
-              r2=np.float(m.group(1))**2+np.float(m.group(2))**2
-              if (r2 < r_limits[0]**2) or (r2 > r_limits[1]**2):
-                  continue
-          try:
-              this_D=[pc.data().from_h5(tile, field_dict={gr : fields}) for gr in ['data_0','data_1']]
-              this_meta=pc.data().from_h5(tile, field_dict={None:['slope_x', 'slope_y','grounded']})
-              if delta_t_limit is not None:
-                  good=np.abs(this_D[1].delta_time[:,0]-this_D[0].delta_time[:,0]) < delta_t_limit
-                  for Di in this_D:
-                      Di.index(good)
-                  this_meta.index(good)
+            except KeyError:
+                if verbose:
+                    print("failed to read " + tile)
+                continue
 
-          except KeyError:
-              if verbose:
-                  print("failed to read " + tile)
-              continue
-
-          D.append(this_D)
-          meta.append(this_meta)
+            D.append(this_D)
+            meta.append(this_meta)
 #        print(m.group(1),m.group(2))
 #            if north:
 #      polarEPSG=3413
 #    else:
 #      polarEPSG=3031
 
-    meta=pc.data().from_list(meta)
-    v={}
-    for field in fields:
-        vi=[]
-        for Di in D:
-            vi.append(np.r_[[np.sum(getattr(Di[ii], field)*Di[ii].W, axis=1) for ii in [0, 1]]])
-        v[field]=np.concatenate(vi, axis=1).T
-    delta={field:np.diff(v[field], axis=1) for field in fields}
-    bar={field:np.mean(v[field], axis=1) for field in fields}
+      meta=pc.data().from_list(meta)
+      v={}
+      for field in fields:
+          vi=[]
+          for Di in D:
+              vi.append(np.r_[[np.sum(getattr(Di[ii], field)*Di[ii].W, axis=1) for ii in [0, 1]]])
+          v[field]=np.concatenate(vi, axis=1).T
+      delta={field:np.diff(v[field], axis=1) for field in fields}
+      bar={field:np.mean(v[field], axis=1) for field in fields}
+
     return v,  delta,  bar, {key:getattr(meta, key) for key in meta.fields}
 ##}}}
 #-------------------------------------------------------------------------------
@@ -96,50 +102,93 @@ meta['slope_mag']=np.abs(meta['slope_x']+1j*meta['slope_y'])
 
 snow_conf = (bar['atl06_quality_summary'][:]<0.01) & (meta['slope_mag'][:]<0.02)
 valid = (bar['atl06_quality_summary'][:]<0.01) & (meta['slope_mag'][:]<0.02)
-valid_0 = (valid & (v['bsnow_conf'][:,0] > 0) & (v['bsnow_conf'][:,1] < 0))
-valid_1 = (valid & (v['bsnow_conf'][:,1] > 0) & (v['bsnow_conf'][:,0] < 0))
+optical_depth = [0, 0.1, 0.2, 0.3, 0.5]
+
+v['bsnow_od'][:,0]=np.ma.masked_invalid(v['bsnow_od'][:,0])
+v['bsnow_od'][:,1]=np.ma.masked_invalid(v['bsnow_od'][:,1])
+# Loop through a range of optical depths
+for od in optical_depth:
+  valid_0 = (valid & (v['bsnow_od'][:,0] > od) & (v['bsnow_od'][:,1] < 0))
+  valid_1 = (valid & (v['bsnow_od'][:,1] > od) & (v['bsnow_od'][:,0] < 0))
 
 
-bsnow_h_valid = v['bsnow_h'][valid_0,0]
-delta_h_valid = delta['h_li'][valid_0]
-bsnow_h_valid_1 = v['bsnow_h'][valid_1,1]
-delta_h_valid_1 = delta['h_li'][valid_1]
+  h_li_diff = [0,0,0,0,0,0]
+  for i in range(0,6,1):
+  # Find rows in v where either:
+  #  -> v['spot'][:,0] == i and v['bsnow_conf'][:,0] > 0 (spot i along track 1 with blowing snow)    
+    valid_spot_0 = (valid & ((v['spot'][:,0] == i+1) & (v['bsnow_conf'][:,1] < 0) & (v['bsnow_conf'][:,0] > 0)))
+    valid_spot_1 = (valid & ((v['spot'][:,1] == i+1) & (v['bsnow_conf'][:,0] < 0) & (v['bsnow_conf'][:,1] > 0)))
+  
 
-#print(np.shape(bsnow_h_valid_0),np.shape(bsnow_h_valid_1))
-#print(np.shape(delta_h_valid_0),np.shape(delta_h_valid_1))
+  # Find rows in v where either:
+  #  -> v['spot'][:,0] == i and v['bsnow_conf'][:,0] > 0 (spot i along track 1 with blowing snow)
+  #  -> v['spot'][:,1]
+    if len(v['h_li'][valid_spot_0,0]) == 0 & len(v['h_li'][valid_spot_0,1]) == 0:
+      continue
+    else:   
+      h_li_diff_0 = v['h_li'][valid_spot_0,0] - v['h_li'][valid_spot_0,1]
+      h_li_diff_1 = v['h_li'][valid_spot_1,1] - v['h_li'][valid_spot_1,0]
+      h_li_diff[i] = np.median(np.append(h_li_diff_0, h_li_diff_1)) 
 
-#for i in range(bsnow_h_valid_1[:,]):
-#    bsnow_h_valid = bsnow_h_valid + bsnow_h_valid_1[i]
+    print("valid_spot",i+1,"num of values",len(h_li_diff_0)+len(h_li_diff_0))
+    print("--------------------------------------------------")
 
-#for i in range(delta_h_valid_1):
-#    delta_h_valid = delta_h_valid + delta_h_valid_1[i]
+  fig = plt.figure(dpi=300)
+  ax = fig.add_subplot(111)
+  tick_name = ['gt1','gt2','gt3','gt4','gt5','gt6']
+  plt.bar(tick_name,h_li_diff)
+  plt.xticks(tick_name)  
 
-bsnow_h_valid = np.append(bsnow_h_valid, bsnow_h_valid_1)
-delta_h_valid = np.append(delta_h_valid, delta_h_valid_1)
+  plt.title(plot_title)
+  plt.xlabel("groundtracks")
+  plt.ylabel("delta height (m)")
+  plt.savefig(plot_title + '_' + str(od)  + '.png', bbox_inches='tight')
+
+sys.exit()
+#delta_h_valid = np.append(delta_h_valid_v0, delta_h_valid_v1)
+
 # Compute Mean, Median and Median Absolute Deviation
-mean_bsnow = np.nanmean(np.abs(delta_h_valid))
-median_bsnow = np.nanmedian(np.abs(delta_h_valid))
-mad_bsnow = np.nanmedian(np.abs(delta_h_valid - np.median(delta_h_valid)))
-#mean_bsnow_1 = np.nanmean(np.abs(bsnow_h_valid_1))
-#median_bsnow_1 = np.nanmedian(np.abs(bsnow_h_valid_1))
-#mad_bsnow_1 = np.median(np.abs(delta_h_valid_1 - np.median(delta_h_valid_1)))
+#mean_delta_h = np.nanmean(delta_h_valid)
+#median_delta_h = np.nanmedian(delta_h_valid)
+#mad_delta_h = np.nanmedian(np.abs(delta_h_valid - np.median(delta_h_valid)))
 
-#mean_bsnow = np.c_[mean_bsnow_0, mean_bsnow_1]
-#median_bsnow = np.c_[median_bsnow_0, median_bsnow_1]
-#mad_bsnow = np.c_[mad_bsnow_0, mad_bsnow_1]
-#print("Mean",mean_bsnow,"Median",median_bsnow_0,"Median Abs. Dev 0",mad_bsnow_0)
-#print("Mean_1",mean_bsnow_1,"Median_1",median_bsnow_1,"Median Abs. Dev 1",mad_bsnow_1)
-label = 'blowing snow height\nMean track=%.6f, Median track=%.6f, MAD track=%.6f' % (mean_bsnow,median_bsnow,mad_bsnow)
+#label = 'Delta Height - Mean=%.6f m, Median=%.6f m, MAD=%.6f m' % (mean_delta_h,median_delta_h,mad_delta_h)
 # Add the subplot
 fig = plt.figure(dpi=300)
 
-plt.scatter(bsnow_h_valid,delta_h_valid, s=2., cmap='RdBu')
+# Create the default figure
+#fig = Figure(figsize=[10, 7])
+#FigureCanvas(fig)
+
+
+ax = fig.add_subplot(111)
+#plt.hist(delta_h_valid, bins = 50)
+
+#delta_h_valid = delta['h_li'][valid_0]
+#delta_h_valid_1 = delta['h_li'][valid_1]
+
+print(delta_h_valid)
+#bsnow_h_valid = np.append(bsnow_h_valid, bsnow_h_valid_1)
+#delta_h_valid_2 = np.append(delta_h_valid, delta_h_valid_1)
+#combined = np.vstack((bsnow_h_valid,delta_h_valid)).T
+#print(np.shape(combined))
+
+#plt.hist(delta_h_valid_2, bins = 50)
+#plt.hist(delta_h_valid, bins = 50)
+#plt.scatter(bsnow_h_valid,delta_h_valid, s=2., cmap='RdBu')
 #plt.scatter(bsnow_h_valid_1,delta_h_valid_1, s=2., cmap='RdBu')
+#ax1 = sns.heatmap(combined, vmin=0, vmax=1)
+tick_name = ['gt1','gt2','gt3','gt4','gt5','gt6']
+plt.bar(tick_name,delta_h_valid)
+plt.xticks(tick_name)
+
 
 plt.title(plot_title)
-plt.xlabel(label)
-plt.ylabel("delta height")
+plt.xlabel("groundtracks")
+plt.ylabel("delta height (m)")
 #plt.text(1.5,1.5, label, size=10, ha="center")
 #import pdb; pdb.set_trace()
 plt.savefig(plot_title + '.png', bbox_inches='tight')
+#figure = ax1.get_figure()
+#figure.savefig('bsnow_heatmap.png', dpi=400)
 sys.exit()
