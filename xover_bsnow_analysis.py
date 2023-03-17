@@ -31,7 +31,7 @@ def read_xovers(xover_dir, verbose=False, wildcard='*', r_limits=[0, 1.e7], delt
         delta: dict of nx2 matrices, giving ATL06 parameter differences between the crossover measurents, late minus early
         meta: metadata values at the crossovers
     """
-    cycles = ['03','04','05','06','07','08','09','10','11','12','13']
+    cycles = ['03','04','05','06','07','08','09','10','11','12','13','14','15','16']
 #    cycles = ['03','04','05','06']
 
     for cycle in cycles:
@@ -102,22 +102,19 @@ meta['slope_mag']=np.abs(meta['slope_x']+1j*meta['slope_y'])
 
 snow_conf = (bar['atl06_quality_summary'][:]<0.01) & (meta['slope_mag'][:]<0.02)
 valid = (bar['atl06_quality_summary'][:]<0.01) & (meta['slope_mag'][:]<0.02)
-optical_depth = [0, 0.1, 0.2, 0.3, 0.5]
-
+optical_depth = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
+od_counter = 0
 v['bsnow_od'][:,0]=np.ma.masked_invalid(v['bsnow_od'][:,0])
 v['bsnow_od'][:,1]=np.ma.masked_invalid(v['bsnow_od'][:,1])
 # Loop through a range of optical depths
 for od in optical_depth:
-  valid_0 = (valid & (v['bsnow_od'][:,0] > od) & (v['bsnow_od'][:,1] < 0))
-  valid_1 = (valid & (v['bsnow_od'][:,1] > od) & (v['bsnow_od'][:,0] < 0))
-
 
   h_li_diff = [0,0,0,0,0,0]
   for i in range(0,6,1):
   # Find rows in v where either:
   #  -> v['spot'][:,0] == i and v['bsnow_conf'][:,0] > 0 (spot i along track 1 with blowing snow)    
-    valid_spot_0 = (valid & ((v['spot'][:,0] == i+1) & (v['bsnow_conf'][:,1] < 0) & (v['bsnow_conf'][:,0] > 0)))
-    valid_spot_1 = (valid & ((v['spot'][:,1] == i+1) & (v['bsnow_conf'][:,0] < 0) & (v['bsnow_conf'][:,1] > 0)))
+    valid_spot_0 = (valid & ((v['spot'][:,0] == i+1) & (v['bsnow_conf'][:,1] < 0) & (v['bsnow_conf'][:,0] > 0) & (v['bsnow_od'][:,0] > od)))
+    valid_spot_1 = (valid & ((v['spot'][:,1] == i+1) & (v['bsnow_conf'][:,0] < 0) & (v['bsnow_conf'][:,1] > 0) & (v['bsnow_od'][:,1] > od)))
   
 
   # Find rows in v where either:
@@ -129,21 +126,21 @@ for od in optical_depth:
       h_li_diff_0 = v['h_li'][valid_spot_0,0] - v['h_li'][valid_spot_0,1]
       h_li_diff_1 = v['h_li'][valid_spot_1,1] - v['h_li'][valid_spot_1,0]
       h_li_diff[i] = np.median(np.append(h_li_diff_0, h_li_diff_1)) 
-
-    print("valid_spot",i+1,"num of values",len(h_li_diff_0)+len(h_li_diff_0))
-    print("--------------------------------------------------")
-
+      print('spot',i+1,'median height value',h_li_diff[i],"num of heights",len(h_li_diff))
+  print("===================================================================")
   fig = plt.figure(dpi=300)
   ax = fig.add_subplot(111)
-  tick_name = ['gt1','gt2','gt3','gt4','gt5','gt6']
-  plt.bar(tick_name,h_li_diff)
-  plt.xticks(tick_name)  
-
-  plt.title(plot_title)
-  plt.xlabel("groundtracks")
-  plt.ylabel("delta height (m)")
-  plt.savefig(plot_title + '_' + str(od)  + '.png', bbox_inches='tight')
-
+  tick_name = ['spot1','spot2','spot3','spot4','spot5','spot6']
+  color_bar = ['blue','orange','grey','yellow','green','red']
+  plt.bar(tick_name,h_li_diff,color=color_bar)
+  plt.xticks(tick_name) 
+  plt.ylim([-0.13,0.00])
+#  plt.legend(tick_name,loc=4)
+  plt.title("clr-clr")
+  plt.xlabel("laser spot")
+  plt.ylabel("median delta height (m)")
+  plt.savefig(plot_title + '_' + str(od_counter)  + '.png', bbox_inches='tight')
+  od_counter = od_counter + 1
 sys.exit()
 #delta_h_valid = np.append(delta_h_valid_v0, delta_h_valid_v1)
 
