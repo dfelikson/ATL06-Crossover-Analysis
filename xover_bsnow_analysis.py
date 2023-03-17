@@ -3,7 +3,6 @@ import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib as mpl
-import seaborn as sns
 #mpl.use('Agg')
 import matplotlib.pyplot as plt
 import pyproj
@@ -109,7 +108,9 @@ v['bsnow_od'][:,1]=np.ma.masked_invalid(v['bsnow_od'][:,1])
 # Loop through a range of optical depths
 for od in optical_depth:
 
-  h_li_diff = [0,0,0,0,0,0]
+  h_li_diff_meds = [0,0,0,0,0,0]
+  print('Blowing snow optical depth > {:3.1f}'.format(od))
+
   for i in range(0,6,1):
   # Find rows in v where either:
   #  -> v['spot'][:,0] == i and v['bsnow_conf'][:,0] > 0 (spot i along track 1 with blowing snow)    
@@ -117,22 +118,23 @@ for od in optical_depth:
     valid_spot_1 = (valid & ((v['spot'][:,1] == i+1) & (v['bsnow_conf'][:,0] < 0) & (v['bsnow_conf'][:,1] > 0) & (v['bsnow_od'][:,1] > od)))
   
 
-  # Find rows in v where either:
-  #  -> v['spot'][:,0] == i and v['bsnow_conf'][:,0] > 0 (spot i along track 1 with blowing snow)
-  #  -> v['spot'][:,1]
+    # Find rows in v where either:
+    #  -> v['spot'][:,0] == i and v['bsnow_conf'][:,0] > 0 (spot i along track 1 with blowing snow)
+    #  -> v['spot'][:,1]
     if len(v['h_li'][valid_spot_0,0]) == 0 & len(v['h_li'][valid_spot_0,1]) == 0:
       continue
     else:   
       h_li_diff_0 = v['h_li'][valid_spot_0,0] - v['h_li'][valid_spot_0,1]
       h_li_diff_1 = v['h_li'][valid_spot_1,1] - v['h_li'][valid_spot_1,0]
-      h_li_diff[i] = np.median(np.append(h_li_diff_0, h_li_diff_1)) 
-      print('spot',i+1,'median height value',h_li_diff[i],"num of heights",len(h_li_diff))
+      h_li_diff   = np.append(h_li_diff_0, h_li_diff_1)
+      h_li_diff_meds[i] = np.median(h_li_diff) 
+      print(' spot {:d} median height difference: {:+7.4f} m ({:6d} points)'.format(i+1, h_li_diff_meds[i], len(h_li_diff)))
   print("===================================================================")
   fig = plt.figure(dpi=300)
   ax = fig.add_subplot(111)
   tick_name = ['spot1','spot2','spot3','spot4','spot5','spot6']
   color_bar = ['blue','orange','grey','yellow','green','red']
-  plt.bar(tick_name,h_li_diff,color=color_bar)
+  plt.bar(tick_name,h_li_diff_meds,color=color_bar)
   plt.xticks(tick_name) 
   plt.ylim([-0.13,0.00])
 #  plt.legend(tick_name,loc=4)
