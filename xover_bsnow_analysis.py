@@ -99,8 +99,11 @@ ATL06_fields=['BP','LR','W','cycle_number','rgt','h_li','h_li_sigma','x','y','sp
 v, delta, bar, meta = read_xovers(xover_dir)#, wildcard='E400_N-500')
 meta['slope_mag']=np.abs(meta['slope_x']+1j*meta['slope_y'])
 
-snow_conf = (bar['atl06_quality_summary'][:]<0.01) & (meta['slope_mag'][:]<0.02)
+print('total number of crossovers: {:d}'.format(len(meta['slope_mag'])))
+
 valid = (bar['atl06_quality_summary'][:]<0.01) & (meta['slope_mag'][:]<0.02)
+print('total number of valid crossovers: {:d}'.format(np.sum(valid)))
+print('')
 optical_depth = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
 od_counter = 0
 v['bsnow_od'][:,0]=np.ma.masked_invalid(v['bsnow_od'][:,0])
@@ -190,4 +193,4 @@ plt.ylabel("delta height (m)")
 plt.savefig(plot_title + '.png', bbox_inches='tight')
 #figure = ax1.get_figure()
 #figure.savefig('bsnow_heatmap.png', dpi=400)
-sys.exit()
+
